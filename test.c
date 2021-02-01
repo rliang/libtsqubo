@@ -4,8 +4,9 @@
 #include "tsqubo.h"
 
 int main() {
+  FILE* file = fopen("G1", "r");
   size_t n, nonzeros;
-  assert(fscanf(stdin, "%zu%zu", &n, &nonzeros) == 2);
+  assert(fscanf(file, "%zu%zu", &n, &nonzeros) == 2);
   assert(n > 0);
   assert(nonzeros > 0);
   double* Q = calloc(n * n, sizeof(double));
@@ -15,7 +16,7 @@ int main() {
   for (size_t k = 0; k < nonzeros; k++) {
     size_t i, j;
     double q;
-    assert(fscanf(stdin, "%zu%zu%lf", &i, &j, &q) == 3);
+    assert(fscanf(file, "%zu%zu%lf", &i, &j, &q) == 3);
     i--;
     j--;
     Q[n * i + i] -= q;
@@ -26,48 +27,44 @@ int main() {
     diag[j] -= q;
     tsqubo_instance_add_component(&inst, i, j, q);
   }
+  fclose(file);
   for (size_t i = 0; i < n; i++) tsqubo_instance_add_component(&inst, i, i, diag[i]);
   free(diag);
-  struct tsqubo ts;
-  tsqubo_init(&ts, &inst);
+  struct tsqubo* ts = tsqubo_new(&inst);
   tsqubo_instance_free(&inst);
-  assert(ts.inst.Q);
-  assert(ts.inst.cols);
-  assert(ts.inst.ncols);
   for (size_t i = 0; i < 10; i++) {
-    tsqubo_reset_solutions(&ts);
-    tsqubo_reset_tabu(&ts);
+    tsqubo_reset_solutions(ts);
+    tsqubo_reset_tabu(ts);
+    for (size_t j = 0; j < n; j++)
+      if (rand() % 2) {
+        tsqubo_flip_current(ts, j);
+        double fy = 0;
+        for (size_t i = 0; i < n; i++)
+          for (size_t j = 0; j <= i; j++) fy += ts->cur.x[i] * ts->cur.x[j] * Q[n * i + j];
+        assert(fy == ts->cur.fx);
+      }
+    tsqubo_commit_incumbent(ts);
+    double fx = 0;
     for (size_t i = 0; i < n; i++)
-      if (rand() % 2) tsqubo_flip_current(&ts, i);
-    for (size_t l = 0; l < 1000; l++) {
-      if (tsqubo_iterate(&ts, n / 10) == TSQUBO_STATE_IMPROVEMENT) tsqubo_local_search(&ts);
+      for (size_t j = 0; j <= i; j++) fx += ts->inc.x[i] * ts->inc.x[j] * Q[n * i + j];
+    assert(fx == ts->inc.fx);
+    for (size_t l = 0; l < 100; l++) {
+      if (tsqubo_iterate(ts, n / 10)) {
+        tsqubo_local_search(ts);
+        tsqubo_commit_incumbent(ts);
+      }
       double fx = 0;
       for (size_t i = 0; i < n; i++)
-        for (size_t j = 0; j <= i; j++) fx += ts.inc.x[i] * ts.inc.x[j] * Q[n * i + j];
-      assert(fx == ts.inc.fx);
+        for (size_t j = 0; j <= i; j++) fx += ts->inc.x[i] * ts->inc.x[j] * Q[n * i + j];
+      assert(fx == ts->inc.fx);
       double fy = 0;
       for (size_t i = 0; i < n; i++)
-        for (size_t j = 0; j <= i; j++) fy += ts.cur.x[i] * ts.cur.x[j] * Q[n * i + j];
-      assert(fy == ts.cur.fx);
-      printf("%zu %zu\n", ts.tabu.nnontabu, ts.tabu.ntargets);
-      for (size_t k = 0; k < ts.tabu.nnontabu; k++) {
-        size_t i = ts.cur.N[k];
-        assert(!ts.tabu.L[i]);
-      }
-      for (size_t k = ts.tabu.nnontabu; k < ts.tabu.ntargets; k++) {
-        size_t i = ts.cur.N[k];
-        assert(ts.tabu.L[i]);
-        assert(ts.cur.fx + ts.cur.dx[i] < ts.inc.fx);
-      }
-      for (size_t k = ts.tabu.ntargets; k < n; k++) {
-        size_t i = ts.cur.N[k];
-        assert(ts.tabu.L[i]);
-        assert(ts.cur.fx + ts.cur.dx[i] >= ts.inc.fx);
-      }
-      printf("%lf %lf\n", ts.inc.fx, ts.cur.fx);
+        for (size_t j = 0; j <= i; j++) fy += ts->cur.x[i] * ts->cur.x[j] * Q[n * i + j];
+      assert(fy == ts->cur.fx);
     }
   }
-  tsqubo_free(&ts);
+  tsqubo_free(ts);
+  free(ts);
   free(Q);
   return 0;
 }

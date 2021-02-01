@@ -11,10 +11,6 @@ struct tsqubo_solution {
   double *x;
   /** The reevaluation vector. */
   double *dx;
-  /** Permutation vector which contains the indices 1,2,...,n. */
-  size_t *N;
-  /** Associates each variable to a position of @ref N. */
-  size_t *I;
 };
 
 /**
@@ -27,9 +23,6 @@ void tsqubo_solution_init(struct tsqubo_solution *sol, size_t n) {
   sol->fx = 0;
   sol->x = (double *)calloc(n, sizeof(double));
   sol->dx = (double *)calloc(n, sizeof(double));
-  sol->N = (size_t *)calloc(n, sizeof(size_t));
-  sol->I = (size_t *)calloc(n, sizeof(size_t));
-  for (size_t i = 0; i < n; i++) sol->N[i] = sol->I[i] = i;
 }
 
 /**
@@ -40,94 +33,21 @@ void tsqubo_solution_init(struct tsqubo_solution *sol, size_t n) {
 void tsqubo_solution_free(struct tsqubo_solution *sol) {
   free(sol->x);
   free(sol->dx);
-  free(sol->N);
-  free(sol->I);
 }
-
-/**
- * Assigns a position, in the permuation vector of a solution, to the given variable.
- *
- * @param sol an initialized solution structure.
- * @param i the index of the variable.
- * @param pos the assigned position in the permutation vector.
- */
-void tsqubo_solution_reorder(struct tsqubo_solution *sol, size_t i, size_t pos) {
-  sol->I[sol->N[pos]] = sol->I[i];
-  sol->N[sol->I[i]] = sol->N[pos];
-  sol->I[i] = pos;
-  sol->N[pos] = i;
-}
-
-/**
- * Searches for the best flip within the best first `nvars` variables
- * in the permutation vector of a solution.
- *
- * @param sol an initialized solution structure.
- * @param nvars the number of variables to search, which must be greater than 0.
- * @return the index of the chosen variable to flip.
- */
-size_t tsqubo_solution_find_flip(const struct tsqubo_solution *sol, size_t nvars) {
-  size_t i = sol->N[0];
-  double d = sol->dx[i];
-  for (size_t k = 1; k < nvars; k++) {
-    size_t j = sol->N[k];
-    double e = sol->dx[j];
-    if (e < d) {
-      d = e;
-      i = j;
-    }
-  }
-  return i;
-}
-
-/** A QUBO tabu list structure. */
-struct tsqubo_tabulist {
-  /** The tabu list. */
-  size_t *L;
-  /** Specifies that the first @ref nnontabu indices are not tabu. */
-  size_t nnontabu;
-  /**
-   * Specifies that the first @ref ntargets indices either
-   * are not tabu or meet the aspiration criterion.
-   */
-  size_t ntargets;
-};
-
-/**
- * Initializes the tabu list structure.
- *
- * @param tabu an uninitialized tabu list structure.
- * @param n the number of variables in the problem instance.
- */
-void tsqubo_tabulist_init(struct tsqubo_tabulist *tabu, size_t n) {
-  tabu->L = (size_t *)calloc(n, sizeof(size_t));
-  tabu->nnontabu = n;
-  tabu->ntargets = n;
-}
-
-/**
- * Frees memory associated with a tabu list structure.
- *
- * @param tabu an initialized tabu list structure.
- */
-void tsqubo_tabulist_free(struct tsqubo_tabulist *tabu) { free(tabu->L); }
-
-/** A component of the Q matrix of a QUBO problem instance. */
-struct tsqubo_instance_component {
-  /** The row of the component. */
-  size_t i;
-  /** The column of the component. */
-  size_t j;
-  /** The value of the component. */
-  double q;
-};
 
 /** A QUBO problem instance structure. */
 struct tsqubo_instance {
   /** The current number of variables in the instance. */
   size_t n;
   /** The array of components in the matrix. */
-  struct tsqubo_instance_component *components;
+  struct {
+    /** The row of the component. */
+    size_t i;
+    /** The column of the component. */
+    size_t j;
+    /** The value of the component. */
+    double q;
+  } * components;
   /** The current size of @ref components. */
   size_t ncomponents;
   /** The capacity of @ref components. */
@@ -142,9 +62,8 @@ struct tsqubo_instance {
  */
 void tsqubo_instance_init(struct tsqubo_instance *inst, size_t capacity) {
   inst->n = 0;
-  inst->components = (struct tsqubo_instance_component *)malloc(
-      (inst->maxcomponents = (capacity < 2 ? 2 : capacity)) *
-      sizeof(struct tsqubo_instance_component));
+  inst->components = (__typeof__(inst->components))malloc(
+      (inst->maxcomponents = (capacity < 2 ? 2 : capacity)) * sizeof(inst->components[0]));
   inst->ncomponents = 0;
 }
 
@@ -187,8 +106,8 @@ void tsqubo_instance_add_component(struct tsqubo_instance *inst, size_t i, size_
     inst->n = j + 1;
   // resize array of components if needed
   if (inst->ncomponents + 2 > inst->maxcomponents)
-    inst->components = (struct tsqubo_instance_component *)realloc(
-        inst->components, (inst->maxcomponents *= 2) * sizeof(struct tsqubo_instance_component));
+    inst->components = (__typeof__(inst->components))realloc(
+        inst->components, (inst->maxcomponents *= 2) * sizeof(inst->components[0]));
   // assign values to component
   if (i == j) {
     // diagonal component
@@ -214,8 +133,10 @@ void tsqubo_instance_add_component(struct tsqubo_instance *inst, size_t i, size_
  *
  * A diagonal component should always come before non-diagonal components.
  */
-static int compare_instance_components(const struct tsqubo_instance_component *a,
-                                       const struct tsqubo_instance_component *b) {
+static int compare_instance_components(const void *a_, const void *b_) {
+  const __typeof__(((struct tsqubo_instance *)NULL)->components)
+      a = (__typeof__(((struct tsqubo_instance *)NULL)->components))a_,
+      b = (__typeof__(((struct tsqubo_instance *)NULL)->components))b_;
   if (a->i < b->i) return -1;
   if (b->i < a->i) return 1;
   if (a->j == a->i) return -1;
@@ -232,76 +153,128 @@ struct tsqubo_compiled_instance {
   /** The coefficients of the matrix. */
   double *Q;
   /** The columns of rows. */
-  size_t *cols;
+  size_t *C;
   /** The position in @ref cols containing the columns of each row. */
-  size_t *icols;
-  /** The number of columns of each row in @ref cols after @ref icols. */
-  size_t *ncols;
+  size_t *R;
 };
 
-void tsqubo_compiled_instance_init(struct tsqubo_compiled_instance *cinst,
-                                   struct tsqubo_instance *inst) {
-  qsort(inst->components, inst->ncomponents, sizeof(struct tsqubo_instance_component),
-        (int (*)(const void *, const void *))compare_instance_components);
+static void tsqubo_compiled_instance_init(struct tsqubo_compiled_instance *cinst,
+                                          struct tsqubo_instance *inst) {
+  qsort(inst->components, inst->ncomponents,
+        sizeof(((struct tsqubo_instance *)NULL)->components[0]), compare_instance_components);
   cinst->n = inst->n;
   cinst->Q = (double *)calloc(inst->ncomponents, sizeof(double));
-  cinst->cols = (size_t *)calloc(inst->ncomponents, sizeof(size_t));
-  cinst->icols = (size_t *)calloc(inst->n, sizeof(size_t));
-  cinst->ncols = (size_t *)calloc(inst->n, sizeof(size_t));
+  cinst->C = (size_t *)calloc(inst->ncomponents, sizeof(size_t));
+  cinst->R = (size_t *)calloc(inst->n + 1, sizeof(size_t));
   for (size_t k = 0; k < inst->ncomponents; k++) {
     size_t i = inst->components[k].i, j = inst->components[k].j;
     cinst->Q[k] = inst->components[k].q;
-    cinst->cols[k] = j;
-    if (k > 0 && i != inst->components[k - 1].i) cinst->icols[i] = k;
-    cinst->ncols[i]++;
+    cinst->C[k] = j;
+    if (k > 0 && i != inst->components[k - 1].i) cinst->R[i] = k;
   }
+  cinst->R[inst->n] = inst->ncomponents;
+  return;
 }
 
-struct tsqubo_compiled_instance *tsqubo_compiled_instance_new(struct tsqubo_instance *inst) {
-  struct tsqubo_compiled_instance *cinst =
-      (struct tsqubo_compiled_instance *)calloc(1, sizeof(struct tsqubo_compiled_instance));
-  tsqubo_compiled_instance_init(cinst, inst);
-  return cinst;
-}
-
-void tsqubo_compiled_instance_free(struct tsqubo_compiled_instance *cinst) {
+static void tsqubo_compiled_instance_free(struct tsqubo_compiled_instance *cinst) {
   free(cinst->Q);
-  free(cinst->cols);
-  free(cinst->icols);
-  free(cinst->ncols);
+  free(cinst->C);
+  free(cinst->R);
 }
 
-/**
- * Copies a solution.
- *
- * @param cinst the instance which the solutions belong to.
- * @param dst the destination solution.
- * @param src the source solution.
- */
-void tsqubo_compiled_instance_copy_solution(const struct tsqubo_compiled_instance *cinst,
-                                            struct tsqubo_solution *dst,
-                                            const struct tsqubo_solution *src) {
-  dst->fx = src->fx;
-  memcpy(dst->x, src->x, cinst->n * sizeof(double));
-  memcpy(dst->dx, src->dx, cinst->n * sizeof(double));
+/** A QUBO tabu search indexed priority queue structure. */
+struct tsqubo_queue {
+  /** A permutation of `{1,2,...n}`. */
+  size_t *N;
+  /** An index vector that associates each `{1,2,...n}` to its position in @ref N. */
+  size_t *I;
+  /** The size of the queue. */
+  size_t size;
+};
+
+enum tsqubo_queue_type {
+  TSQUBO_QUEUE_TYPE_SIZE,
+  TSQUBO_QUEUE_TYPE_DOUBLE,
+};
+
+static void tsqubo_queue_init(struct tsqubo_queue *q, size_t n) {
+  q->N = (size_t *)calloc(n, sizeof(size_t));
+  q->I = (size_t *)calloc(n, sizeof(size_t));
+  for (size_t i = 0; i < n; i++) q->N[i] = q->I[i] = i;
+  q->size = 0;
 }
 
-/**
- * Flips a variable of a solution.
- *
- * @param inst an initialized problem instance structure.
- * @param sol an initialized solution structure.
- * @param i the index of the variable to flip.
- */
-void tsqubo_compiled_instance_flip_solution(const struct tsqubo_compiled_instance *inst,
-                                            struct tsqubo_solution *sol, size_t i) {
-  sol->fx += sol->dx[i];
-  sol->x[i] = !sol->x[i];
-  sol->dx[i] = -sol->dx[i];
-  for (size_t k = 1; k < inst->ncols[i]; k++) {
-    size_t j = inst->cols[inst->icols[i] + k];
-    sol->dx[j] -= (1 - 2 * sol->x[i]) * (1 - 2 * sol->x[j]) * inst->Q[inst->icols[i] + k];
+static void tsqubo_queue_free(struct tsqubo_queue *q) {
+  free(q->N);
+  free(q->I);
+}
+
+static void tsqubo_queue_reorder(struct tsqubo_queue *q, size_t i, size_t k) {
+  q->I[q->N[k]] = q->I[i];
+  q->N[q->I[i]] = q->N[k];
+  q->I[i] = k;
+  q->N[k] = i;
+}
+
+static int tsqubo_queue_contains(const struct tsqubo_queue *q, size_t i) {
+  return q->I[i] < q->size;
+}
+
+static size_t tsqubo_queue_top(const struct tsqubo_queue *q) { return q->N[0]; }
+
+static int tsqubo_queue_compare(const struct tsqubo_queue *q, const void *dy,
+                                enum tsqubo_queue_type type, size_t a, size_t b) {
+  const size_t *dx = (const size_t *)dy;
+  const double *dz = (const double *)dy;
+  switch (type) {
+    case TSQUBO_QUEUE_TYPE_SIZE:
+      return dx[q->N[a]] < dx[q->N[b]] || (dx[q->N[a]] == dx[q->N[b]] && q->N[a] < q->N[b]);
+    case TSQUBO_QUEUE_TYPE_DOUBLE:
+      return dz[q->N[a]] < dz[q->N[b]] || (dz[q->N[a]] == dz[q->N[b]] && q->N[a] < q->N[b]);
   }
+  return 0;
+}
+
+static void tsqubo_queue_heapify(struct tsqubo_queue *q, const void *dx,
+                                 enum tsqubo_queue_type type, size_t k) {
+  for (;;) {
+    size_t smallest = k, left = 2 * k + 1, right = 2 * k + 2;
+    if (left < q->size && tsqubo_queue_compare(q, dx, type, left, k)) smallest = left;
+    if (right < q->size && tsqubo_queue_compare(q, dx, type, right, smallest)) smallest = right;
+    if (smallest == k) break;
+    tsqubo_queue_reorder(q, q->N[k], smallest);
+    k = smallest;
+  }
+}
+
+static void tsqubo_queue_decrease(struct tsqubo_queue *q, const void *dx,
+                                  enum tsqubo_queue_type type, size_t k) {
+  for (size_t parent = (k - 1) / 2; k && tsqubo_queue_compare(q, dx, k, type, parent);
+       parent = (k - 1) / 2) {
+    tsqubo_queue_reorder(q, q->N[k], parent);
+    k = parent;
+  }
+}
+
+static void tsqubo_queue_push(struct tsqubo_queue *q, const void *dx, enum tsqubo_queue_type type,
+                              size_t i) {
+  size_t k = q->size++;
+  tsqubo_queue_reorder(q, i, k);
+  tsqubo_queue_decrease(q, dx, type, k);
+}
+
+static void tsqubo_queue_pop(struct tsqubo_queue *q, const void *dx, enum tsqubo_queue_type type) {
+  tsqubo_queue_reorder(q, tsqubo_queue_top(q), --q->size);
+  tsqubo_queue_heapify(q, dx, type, 0);
+}
+
+static void tsqubo_queue_remove(struct tsqubo_queue *q, const void *dx, enum tsqubo_queue_type type,
+                                size_t k) {
+  for (size_t parent = (k - 1) / 2; k; parent = (k - 1) / 2) {
+    tsqubo_queue_reorder(q, q->N[k], parent);
+    k = parent;
+  }
+  tsqubo_queue_pop(q, dx, type);
 }
 
 /** A QUBO tabu search structure. */
@@ -313,7 +286,15 @@ struct tsqubo {
   /** The current solution of the search. */
   struct tsqubo_solution cur;
   /** The tabu list. */
-  struct tsqubo_tabulist tabu;
+  size_t *tabulist;
+  /** The iteration counter. */
+  size_t iteration;
+  /** A priority queue of indices not in the tabu list, based on reevaluation vector values. */
+  struct tsqubo_queue d;
+  /** A priority queue of indices in the tabu list, based on the values in the tabu list. */
+  struct tsqubo_queue l;
+  /** A priority queue of indices in the tabu list, based on reevaluation vector values. */
+  struct tsqubo_queue ld;
 };
 
 /**
@@ -325,7 +306,10 @@ void tsqubo_init(struct tsqubo *ts, struct tsqubo_instance *inst) {
   tsqubo_compiled_instance_init(&ts->inst, inst);
   tsqubo_solution_init(&ts->inc, inst->n);
   tsqubo_solution_init(&ts->cur, inst->n);
-  tsqubo_tabulist_init(&ts->tabu, inst->n);
+  ts->tabulist = (size_t *)calloc(inst->n, sizeof(size_t));
+  tsqubo_queue_init(&ts->d, inst->n);
+  tsqubo_queue_init(&ts->l, inst->n);
+  tsqubo_queue_init(&ts->ld, inst->n);
 }
 
 /**
@@ -348,7 +332,10 @@ void tsqubo_free(struct tsqubo *ts) {
   tsqubo_compiled_instance_free(&ts->inst);
   tsqubo_solution_free(&ts->inc);
   tsqubo_solution_free(&ts->cur);
-  tsqubo_tabulist_free(&ts->tabu);
+  free(ts->tabulist);
+  tsqubo_queue_free(&ts->d);
+  tsqubo_queue_free(&ts->l);
+  tsqubo_queue_free(&ts->ld);
 }
 
 /**
@@ -357,7 +344,9 @@ void tsqubo_free(struct tsqubo *ts) {
  * @param ts an initialized TS structure.
  */
 void tsqubo_commit_incumbent(struct tsqubo *ts) {
-  tsqubo_compiled_instance_copy_solution(&ts->inst, &ts->inc, &ts->cur);
+  ts->inc.fx = ts->cur.fx;
+  memcpy(ts->inc.x, ts->cur.x, ts->inst.n * sizeof(double));
+  memcpy(ts->inc.dx, ts->cur.dx, ts->inst.n * sizeof(double));
 }
 
 /**
@@ -368,7 +357,14 @@ void tsqubo_commit_incumbent(struct tsqubo *ts) {
 void tsqubo_reset_solutions(struct tsqubo *ts) {
   ts->cur.fx = 0;
   memset(ts->cur.x, 0, ts->inst.n * sizeof(double));
-  for (size_t i = 0; i < ts->inst.n; i++) ts->cur.dx[i] = ts->inst.Q[ts->inst.icols[i]];
+  for (size_t i = 0; i < ts->inst.n; i++) {
+    ts->cur.dx[i] = 0;
+    for (size_t k = ts->inst.R[i]; k < ts->inst.R[i + 1]; k++)
+      if (ts->inst.C[k] == i) {
+        ts->cur.dx[i] = ts->inst.Q[k];
+        break;
+      }
+  }
   tsqubo_commit_incumbent(ts);
 }
 
@@ -378,9 +374,11 @@ void tsqubo_reset_solutions(struct tsqubo *ts) {
  * @param ts an initialized TS structure.
  */
 void tsqubo_reset_tabu(struct tsqubo *ts) {
-  ts->tabu.nnontabu = ts->inst.n;
-  ts->tabu.ntargets = ts->inst.n;
-  memset(ts->tabu.L, 0, ts->inst.n * sizeof(size_t));
+  memset(ts->tabulist, 0, ts->inst.n * sizeof(size_t));
+  ts->iteration = 0;
+  ts->d.size = ts->l.size = ts->ld.size = 0;
+  for (size_t i = 0; i < ts->inst.n; i++)
+    tsqubo_queue_push(&ts->d, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, i);
 }
 
 /**
@@ -388,13 +386,29 @@ void tsqubo_reset_tabu(struct tsqubo *ts) {
  *
  * @param ts an initialized TS structure.
  * @param i the index of the variable to flip.
- * @return whether the incumbent solution was improved.
  */
-int tsqubo_flip_current(struct tsqubo *ts, size_t i) {
-  tsqubo_compiled_instance_flip_solution(&ts->inst, &ts->cur, i);
-  if (ts->cur.fx >= ts->inc.fx) return 0;
-  tsqubo_commit_incumbent(ts);
-  return 1;
+void tsqubo_flip_current(struct tsqubo *ts, size_t i) {
+  ts->cur.fx += ts->cur.dx[i];
+  ts->cur.x[i] = 1 - ts->cur.x[i];
+  for (size_t k = ts->inst.R[i]; k < ts->inst.R[i + 1]; k++) {
+    size_t j = ts->inst.C[k];
+    double d = ts->cur.dx[j];
+    ts->cur.dx[j] =
+        j == i ? -ts->cur.dx[j]
+               : ts->cur.dx[j] - (1 - 2 * ts->cur.x[i]) * (1 - 2 * ts->cur.x[j]) * ts->inst.Q[k];
+    if (ts->cur.dx[j] < d) {
+      if (tsqubo_queue_contains(&ts->d, j))
+        tsqubo_queue_decrease(&ts->d, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, ts->d.I[j]);
+      if (tsqubo_queue_contains(&ts->ld, j))
+        tsqubo_queue_decrease(&ts->ld, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, ts->ld.I[j]);
+    }
+    if (ts->cur.dx[j] > d) {
+      if (tsqubo_queue_contains(&ts->d, j))
+        tsqubo_queue_heapify(&ts->d, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, ts->d.I[j]);
+      if (tsqubo_queue_contains(&ts->ld, j))
+        tsqubo_queue_heapify(&ts->ld, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, ts->ld.I[j]);
+    }
+  }
 }
 
 /**
@@ -403,86 +417,47 @@ int tsqubo_flip_current(struct tsqubo *ts, size_t i) {
  * @param ts an initialized TS structure.
  */
 void tsqubo_local_search(struct tsqubo *ts) {
-  // partition the N vector between variables which offer improvement when flipped or not
-  size_t nvars = 0;
-  for (size_t k = 0; k < ts->inst.n; k++) {
-    size_t i = ts->inc.N[k];
-    if (ts->inc.dx[i] < 0) tsqubo_solution_reorder(&ts->inc, i, nvars++);
-  }
-  // local search
-  while (nvars) {
-    size_t i = tsqubo_solution_find_flip(&ts->inc, nvars);
-    tsqubo_compiled_instance_flip_solution(&ts->inst, &ts->inc, i);
-    tsqubo_solution_reorder(&ts->inc, i, --nvars);
-    for (size_t k = 1; k < ts->inst.ncols[i]; k++) {
-      size_t j = ts->inst.cols[ts->inst.icols[i] + k];
-      if (ts->inc.dx[j] < 0 && ts->inc.I[j] >= nvars)
-        tsqubo_solution_reorder(&ts->inc, j, nvars++);
-      else if (ts->inc.dx[j] >= 0 && ts->inc.I[j] < nvars)
-        tsqubo_solution_reorder(&ts->inc, j, --nvars);
+  for (;;) {
+    size_t i = tsqubo_queue_top(&ts->d);
+    if (ts->ld.size) {
+      size_t j = tsqubo_queue_top(&ts->ld);
+      if (ts->cur.dx[j] < ts->cur.dx[i]) i = j;
     }
-  }
-  // update in case some variables start or stop meeting the aspiration criterion
-  size_t k = ts->tabu.nnontabu, ntargets_prev = ts->tabu.ntargets;
-  while (k < ts->tabu.ntargets) {
-    size_t j = ts->cur.N[k];
-    if (ts->cur.fx + ts->cur.dx[j] >= ts->inc.fx)
-      tsqubo_solution_reorder(&ts->cur, j, --ts->tabu.ntargets);
-    else
-      k++;
-  }
-  for (k = ntargets_prev; k < ts->inst.n; k++) {
-    size_t j = ts->cur.N[k];
-    if (ts->cur.fx + ts->cur.dx[j] < ts->inc.fx)
-      tsqubo_solution_reorder(&ts->cur, j, ts->tabu.ntargets++);
+    if (ts->cur.dx[i] >= 0) break;
+    tsqubo_flip_current(ts, i);
   }
 }
-
-/** The state of the tabu search. */
-enum tsqubo_state {
-  /** No flip moves could be made. */
-  TSQUBO_STATE_END,
-  /** A flip move was made but did not improve the incumbent. */
-  TSQUBO_STATE_SEARCH,
-  /** A flip move was made which improved the incumbent. */
-  TSQUBO_STATE_IMPROVEMENT
-};
 
 /**
  * Performs a TS iteration.
  *
  * @param ts an initialized TS structure.
  * @param K the tabu tenure to assign to flipped variables.
- * @return the result.
+ * @return whether an improved solution was found or not.
  */
-enum tsqubo_state tsqubo_iterate(struct tsqubo *ts, size_t K) {
-  if (!ts->tabu.ntargets) return TSQUBO_STATE_END;
-  size_t i = tsqubo_solution_find_flip(&ts->cur, ts->tabu.ntargets);
-  int improvement = tsqubo_flip_current(ts, i);
-  // decrement aspiration and tabu variables
-  for (size_t k = ts->tabu.nnontabu; k < ts->inst.n; k++) {
-    size_t j = ts->cur.N[k], l = --ts->tabu.L[j];
-    if (k >= ts->tabu.ntargets && (!l || ts->cur.fx + ts->cur.dx[j] < ts->inc.fx))
-      tsqubo_solution_reorder(&ts->cur, j, ts->tabu.ntargets++);
-    if (!l) tsqubo_solution_reorder(&ts->cur, j, ts->tabu.nnontabu++);
+__attribute__((hot)) int tsqubo_iterate(struct tsqubo *ts, size_t K) {
+  size_t i = tsqubo_queue_top(&ts->d);
+  if (ts->ld.size) {
+    size_t j = tsqubo_queue_top(&ts->ld);
+    if (ts->cur.fx + ts->cur.dx[j] < ts->inc.fx && ts->cur.dx[j] < ts->cur.dx[i]) i = j;
   }
-  // assign tenure to flipped variable
-  ts->tabu.L[i] = K;
-  if (ts->cur.I[i] < ts->tabu.nnontabu) tsqubo_solution_reorder(&ts->cur, i, --ts->tabu.nnontabu);
-  if (ts->cur.fx + ts->cur.dx[i] >= ts->inc.fx)
-    tsqubo_solution_reorder(&ts->cur, i, --ts->tabu.ntargets);
-  // update variables whose delta values were updated
-  for (size_t k = 1; k < ts->inst.ncols[i]; k++) {
-    size_t j = ts->inst.cols[ts->inst.icols[i] + k];
-    if (ts->cur.I[j] >= ts->tabu.ntargets) {
-      if (ts->cur.fx + ts->cur.dx[j] < ts->inc.fx)
-        tsqubo_solution_reorder(&ts->cur, j, ts->tabu.ntargets++);
-    } else if (ts->cur.I[j] >= ts->tabu.nnontabu) {
-      if (ts->cur.fx + ts->cur.dx[j] >= ts->inc.fx)
-        tsqubo_solution_reorder(&ts->cur, j, --ts->tabu.ntargets);
-    }
+  ++ts->iteration;
+  ts->tabulist[i] = ts->iteration + K;
+  if (tsqubo_queue_contains(&ts->l, i)) {
+    tsqubo_queue_heapify(&ts->l, ts->tabulist, TSQUBO_QUEUE_TYPE_SIZE, ts->l.I[i]);
+  } else {
+    tsqubo_queue_pop(&ts->d, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE);
+    tsqubo_queue_push(&ts->l, ts->tabulist, TSQUBO_QUEUE_TYPE_SIZE, i);
+    tsqubo_queue_push(&ts->ld, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, i);
   }
-  return improvement ? TSQUBO_STATE_IMPROVEMENT : TSQUBO_STATE_SEARCH;
+  while (ts->l.size && ts->iteration >= ts->tabulist[tsqubo_queue_top(&ts->l)]) {
+    size_t j = tsqubo_queue_top(&ts->l);
+    tsqubo_queue_pop(&ts->l, ts->tabulist, TSQUBO_QUEUE_TYPE_SIZE);
+    tsqubo_queue_remove(&ts->ld, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, ts->ld.I[j]);
+    tsqubo_queue_push(&ts->d, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, j);
+  }
+  tsqubo_flip_current(ts, i);
+  return ts->cur.fx < ts->inc.fx;
 }
 
 /**
@@ -494,15 +469,10 @@ enum tsqubo_state tsqubo_iterate(struct tsqubo *ts, size_t K) {
  */
 void tsqubo_iterate_cutoff(struct tsqubo *ts, size_t K, size_t cutoff) {
 begin:
-  for (size_t i = 0; i < cutoff; i++) {
-    switch (tsqubo_iterate(ts, K)) {
-      case TSQUBO_STATE_IMPROVEMENT:
-        tsqubo_local_search(ts);
-        goto begin;
-      case TSQUBO_STATE_END:
-        return;
-      default:
-        break;
+  for (size_t i = 0; i < cutoff; i++)
+    if (tsqubo_iterate(ts, K)) {
+      tsqubo_local_search(ts);
+      tsqubo_commit_incumbent(ts);
+      goto begin;
     }
-  }
 }

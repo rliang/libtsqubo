@@ -16,12 +16,14 @@ int main() {
 
   struct tsqubo* ts = tsqubo_new(instance);
   tsqubo_instance_free(instance);
+  free(instance);
 
-  size_t K = 10, cutoff = 5;
-  tsqubo_iterate_cutoff(ts, K, cutoff);
+  size_t tabu_tenure_constant = 10, improvement_cutoff = 5;
+  tsqubo_iterate_cutoff(ts, tabu_tenure_constant, improvement_cutoff);
   printf("%lf\n", ts->inc.fx);
 
   tsqubo_free(ts);
+  free(ts);
   return 0;
 }
 ```
