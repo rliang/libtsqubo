@@ -192,89 +192,84 @@ struct tsqubo_queue {
   size_t size;
 };
 
-enum tsqubo_queue_type {
-  TSQUBO_QUEUE_TYPE_SIZE,
-  TSQUBO_QUEUE_TYPE_DOUBLE,
-};
-
-static void tsqubo_queue_init(struct tsqubo_queue *q, size_t n) {
+static void queue_init(struct tsqubo_queue *q, size_t n) {
   q->N = (size_t *)calloc(n, sizeof(size_t));
   q->I = (size_t *)calloc(n, sizeof(size_t));
   for (size_t i = 0; i < n; i++) q->N[i] = q->I[i] = i;
   q->size = 0;
 }
 
-static void tsqubo_queue_free(struct tsqubo_queue *q) {
+static void queue_free(struct tsqubo_queue *q) {
   free(q->N);
   free(q->I);
 }
 
-static void tsqubo_queue_reorder(struct tsqubo_queue *q, size_t i, size_t k) {
+static void queue_reorder(struct tsqubo_queue *q, size_t i, size_t k) {
   q->I[q->N[k]] = q->I[i];
   q->N[q->I[i]] = q->N[k];
   q->I[i] = k;
   q->N[k] = i;
 }
 
-static int tsqubo_queue_contains(const struct tsqubo_queue *q, size_t i) {
-  return q->I[i] < q->size;
+static int queue_contains(const struct tsqubo_queue *q, size_t i) { return q->I[i] < q->size; }
+
+static size_t queue_top(const struct tsqubo_queue *q) { return q->N[0]; }
+
+static int compare_size(const struct tsqubo_queue *q, const void *v_, size_t a, size_t b) {
+  const size_t *v = (const size_t *)v_;
+  return v[q->N[a]] < v[q->N[b]] || (v[q->N[a]] == v[q->N[b]] && q->N[a] < q->N[b]);
 }
 
-static size_t tsqubo_queue_top(const struct tsqubo_queue *q) { return q->N[0]; }
-
-static int tsqubo_queue_compare(const struct tsqubo_queue *q, const void *dy,
-                                enum tsqubo_queue_type type, size_t a, size_t b) {
-  const size_t *dx = (const size_t *)dy;
-  const double *dz = (const double *)dy;
-  switch (type) {
-    case TSQUBO_QUEUE_TYPE_SIZE:
-      return dx[q->N[a]] < dx[q->N[b]] || (dx[q->N[a]] == dx[q->N[b]] && q->N[a] < q->N[b]);
-    case TSQUBO_QUEUE_TYPE_DOUBLE:
-      return dz[q->N[a]] < dz[q->N[b]] || (dz[q->N[a]] == dz[q->N[b]] && q->N[a] < q->N[b]);
-  }
-  return 0;
+static int compare_double(const struct tsqubo_queue *q, const void *v_, size_t a, size_t b) {
+  const double *v = (const double *)v_;
+  return v[q->N[a]] < v[q->N[b]] || (v[q->N[a]] == v[q->N[b]] && q->N[a] < q->N[b]);
 }
 
-static void tsqubo_queue_heapify(struct tsqubo_queue *q, const void *dx,
-                                 enum tsqubo_queue_type type, size_t k) {
+static void queue_heapify(struct tsqubo_queue *q, const void *dx,
+                          int (*compare)(const struct tsqubo_queue *, const void *, size_t, size_t),
+                          size_t k) {
   for (;;) {
     size_t smallest = k, left = 2 * k + 1, right = 2 * k + 2;
-    if (left < q->size && tsqubo_queue_compare(q, dx, type, left, k)) smallest = left;
-    if (right < q->size && tsqubo_queue_compare(q, dx, type, right, smallest)) smallest = right;
+    if (left < q->size && compare(q, dx, left, k)) smallest = left;
+    if (right < q->size && compare(q, dx, right, smallest)) smallest = right;
     if (smallest == k) break;
-    tsqubo_queue_reorder(q, q->N[k], smallest);
+    queue_reorder(q, q->N[k], smallest);
     k = smallest;
   }
 }
 
-static void tsqubo_queue_decrease(struct tsqubo_queue *q, const void *dx,
-                                  enum tsqubo_queue_type type, size_t k) {
-  for (size_t parent = (k - 1) / 2; k && tsqubo_queue_compare(q, dx, k, type, parent);
-       parent = (k - 1) / 2) {
-    tsqubo_queue_reorder(q, q->N[k], parent);
+static void queue_decrease(struct tsqubo_queue *q, const void *dx,
+                           int (*compare)(const struct tsqubo_queue *, const void *, size_t,
+                                          size_t),
+                           size_t k) {
+  for (size_t parent = (k - 1) / 2; k && compare(q, dx, k, parent); parent = (k - 1) / 2) {
+    queue_reorder(q, q->N[k], parent);
     k = parent;
   }
 }
 
-static void tsqubo_queue_push(struct tsqubo_queue *q, const void *dx, enum tsqubo_queue_type type,
-                              size_t i) {
+static void queue_push(struct tsqubo_queue *q, const void *dx,
+                       int (*compare)(const struct tsqubo_queue *, const void *, size_t, size_t),
+                       size_t i) {
   size_t k = q->size++;
-  tsqubo_queue_reorder(q, i, k);
-  tsqubo_queue_decrease(q, dx, type, k);
+  queue_reorder(q, i, k);
+  queue_decrease(q, dx, compare, k);
 }
 
-static void tsqubo_queue_pop(struct tsqubo_queue *q, const void *dx, enum tsqubo_queue_type type) {
-  tsqubo_queue_reorder(q, tsqubo_queue_top(q), --q->size);
-  tsqubo_queue_heapify(q, dx, type, 0);
+static void queue_pop(struct tsqubo_queue *q, const void *dx,
+                      int (*compare)(const struct tsqubo_queue *, const void *, size_t, size_t)) {
+  queue_reorder(q, queue_top(q), --q->size);
+  queue_heapify(q, dx, compare, 0);
 }
 
-static void tsqubo_queue_remove(struct tsqubo_queue *q, const void *dx, enum tsqubo_queue_type type,
-                                size_t k) {
+static void queue_remove(struct tsqubo_queue *q, const void *dx,
+                         int (*compare)(const struct tsqubo_queue *, const void *, size_t, size_t),
+                         size_t k) {
   for (size_t parent = (k - 1) / 2; k; parent = (k - 1) / 2) {
-    tsqubo_queue_reorder(q, q->N[k], parent);
+    queue_reorder(q, q->N[k], parent);
     k = parent;
   }
-  tsqubo_queue_pop(q, dx, type);
+  queue_pop(q, dx, compare);
 }
 
 /** A QUBO tabu search structure. */
@@ -307,9 +302,9 @@ void tsqubo_init(struct tsqubo *ts, struct tsqubo_instance *inst) {
   tsqubo_solution_init(&ts->inc, inst->n);
   tsqubo_solution_init(&ts->cur, inst->n);
   ts->tabulist = (size_t *)calloc(inst->n, sizeof(size_t));
-  tsqubo_queue_init(&ts->d, inst->n);
-  tsqubo_queue_init(&ts->l, inst->n);
-  tsqubo_queue_init(&ts->ld, inst->n);
+  queue_init(&ts->d, inst->n);
+  queue_init(&ts->l, inst->n);
+  queue_init(&ts->ld, inst->n);
 }
 
 /**
@@ -333,9 +328,9 @@ void tsqubo_free(struct tsqubo *ts) {
   tsqubo_solution_free(&ts->inc);
   tsqubo_solution_free(&ts->cur);
   free(ts->tabulist);
-  tsqubo_queue_free(&ts->d);
-  tsqubo_queue_free(&ts->l);
-  tsqubo_queue_free(&ts->ld);
+  queue_free(&ts->d);
+  queue_free(&ts->l);
+  queue_free(&ts->ld);
 }
 
 /**
@@ -377,8 +372,7 @@ void tsqubo_reset_tabu(struct tsqubo *ts) {
   memset(ts->tabulist, 0, ts->inst.n * sizeof(size_t));
   ts->iteration = 0;
   ts->d.size = ts->l.size = ts->ld.size = 0;
-  for (size_t i = 0; i < ts->inst.n; i++)
-    tsqubo_queue_push(&ts->d, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, i);
+  for (size_t i = 0; i < ts->inst.n; i++) queue_push(&ts->d, ts->cur.dx, compare_double, i);
 }
 
 /**
@@ -397,16 +391,14 @@ void tsqubo_flip_current(struct tsqubo *ts, size_t i) {
         j == i ? -ts->cur.dx[j]
                : ts->cur.dx[j] - (1 - 2 * ts->cur.x[i]) * (1 - 2 * ts->cur.x[j]) * ts->inst.Q[k];
     if (ts->cur.dx[j] < d) {
-      if (tsqubo_queue_contains(&ts->d, j))
-        tsqubo_queue_decrease(&ts->d, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, ts->d.I[j]);
-      if (tsqubo_queue_contains(&ts->ld, j))
-        tsqubo_queue_decrease(&ts->ld, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, ts->ld.I[j]);
+      if (queue_contains(&ts->d, j)) queue_decrease(&ts->d, ts->cur.dx, compare_double, ts->d.I[j]);
+      if (queue_contains(&ts->ld, j))
+        queue_decrease(&ts->ld, ts->cur.dx, compare_double, ts->ld.I[j]);
     }
     if (ts->cur.dx[j] > d) {
-      if (tsqubo_queue_contains(&ts->d, j))
-        tsqubo_queue_heapify(&ts->d, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, ts->d.I[j]);
-      if (tsqubo_queue_contains(&ts->ld, j))
-        tsqubo_queue_heapify(&ts->ld, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, ts->ld.I[j]);
+      if (queue_contains(&ts->d, j)) queue_heapify(&ts->d, ts->cur.dx, compare_double, ts->d.I[j]);
+      if (queue_contains(&ts->ld, j))
+        queue_heapify(&ts->ld, ts->cur.dx, compare_double, ts->ld.I[j]);
     }
   }
 }
@@ -418,9 +410,9 @@ void tsqubo_flip_current(struct tsqubo *ts, size_t i) {
  */
 void tsqubo_local_search(struct tsqubo *ts) {
   for (;;) {
-    size_t i = tsqubo_queue_top(&ts->d);
+    size_t i = queue_top(&ts->d);
     if (ts->ld.size) {
-      size_t j = tsqubo_queue_top(&ts->ld);
+      size_t j = queue_top(&ts->ld);
       if (ts->cur.dx[j] < ts->cur.dx[i]) i = j;
     }
     if (ts->cur.dx[i] >= 0) break;
@@ -435,26 +427,26 @@ void tsqubo_local_search(struct tsqubo *ts) {
  * @param K the tabu tenure to assign to flipped variables.
  * @return whether an improved solution was found or not.
  */
-__attribute__((hot)) int tsqubo_iterate(struct tsqubo *ts, size_t K) {
-  size_t i = tsqubo_queue_top(&ts->d);
+int tsqubo_iterate(struct tsqubo *ts, size_t K) {
+  size_t i = queue_top(&ts->d);
   if (ts->ld.size) {
-    size_t j = tsqubo_queue_top(&ts->ld);
+    size_t j = queue_top(&ts->ld);
     if (ts->cur.fx + ts->cur.dx[j] < ts->inc.fx && ts->cur.dx[j] < ts->cur.dx[i]) i = j;
   }
   ++ts->iteration;
   ts->tabulist[i] = ts->iteration + K;
-  if (tsqubo_queue_contains(&ts->l, i)) {
-    tsqubo_queue_heapify(&ts->l, ts->tabulist, TSQUBO_QUEUE_TYPE_SIZE, ts->l.I[i]);
+  if (queue_contains(&ts->l, i)) {
+    queue_heapify(&ts->l, ts->tabulist, compare_size, ts->l.I[i]);
   } else {
-    tsqubo_queue_pop(&ts->d, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE);
-    tsqubo_queue_push(&ts->l, ts->tabulist, TSQUBO_QUEUE_TYPE_SIZE, i);
-    tsqubo_queue_push(&ts->ld, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, i);
+    queue_pop(&ts->d, ts->cur.dx, compare_double);
+    queue_push(&ts->l, ts->tabulist, compare_size, i);
+    queue_push(&ts->ld, ts->cur.dx, compare_double, i);
   }
-  while (ts->l.size && ts->iteration >= ts->tabulist[tsqubo_queue_top(&ts->l)]) {
-    size_t j = tsqubo_queue_top(&ts->l);
-    tsqubo_queue_pop(&ts->l, ts->tabulist, TSQUBO_QUEUE_TYPE_SIZE);
-    tsqubo_queue_remove(&ts->ld, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, ts->ld.I[j]);
-    tsqubo_queue_push(&ts->d, ts->cur.dx, TSQUBO_QUEUE_TYPE_DOUBLE, j);
+  while (ts->l.size && ts->iteration >= ts->tabulist[queue_top(&ts->l)]) {
+    size_t j = queue_top(&ts->l);
+    queue_pop(&ts->l, ts->tabulist, compare_size);
+    queue_remove(&ts->ld, ts->cur.dx, compare_double, ts->ld.I[j]);
+    queue_push(&ts->d, ts->cur.dx, compare_double, j);
   }
   tsqubo_flip_current(ts, i);
   return ts->cur.fx < ts->inc.fx;
