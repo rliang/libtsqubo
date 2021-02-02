@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -173,7 +174,6 @@ static void tsqubo_compiled_instance_init(struct tsqubo_compiled_instance *cinst
     if (k > 0 && i != inst->components[k - 1].i) cinst->R[i] = k;
   }
   cinst->R[inst->n] = inst->ncomponents;
-  return;
 }
 
 static void tsqubo_compiled_instance_free(struct tsqubo_compiled_instance *cinst) {
@@ -181,6 +181,8 @@ static void tsqubo_compiled_instance_free(struct tsqubo_compiled_instance *cinst
   free(cinst->C);
   free(cinst->R);
 }
+
+#ifdef TSQUBO_SPARSE
 
 /** A QUBO tabu search indexed priority queue structure. */
 struct tsqubo_queue {
@@ -272,6 +274,8 @@ static void queue_remove(struct tsqubo_queue *q, const void *dx,
   queue_pop(q, dx, compare);
 }
 
+#endif
+
 /** A QUBO tabu search structure. */
 struct tsqubo {
   /** The problem instance. */
@@ -284,12 +288,14 @@ struct tsqubo {
   size_t *tabulist;
   /** The iteration counter. */
   size_t iteration;
+#ifdef TSQUBO_SPARSE
   /** A priority queue of indices not in the tabu list, based on reevaluation vector values. */
   struct tsqubo_queue d;
   /** A priority queue of indices in the tabu list, based on the values in the tabu list. */
   struct tsqubo_queue l;
   /** A priority queue of indices in the tabu list, based on reevaluation vector values. */
   struct tsqubo_queue ld;
+#endif
 };
 
 /**
@@ -302,9 +308,11 @@ void tsqubo_init(struct tsqubo *ts, struct tsqubo_instance *inst) {
   tsqubo_solution_init(&ts->inc, inst->n);
   tsqubo_solution_init(&ts->cur, inst->n);
   ts->tabulist = (size_t *)calloc(inst->n, sizeof(size_t));
+#ifdef TSQUBO_SPARSE
   queue_init(&ts->d, inst->n);
   queue_init(&ts->l, inst->n);
   queue_init(&ts->ld, inst->n);
+#endif
 }
 
 /**
@@ -328,9 +336,11 @@ void tsqubo_free(struct tsqubo *ts) {
   tsqubo_solution_free(&ts->inc);
   tsqubo_solution_free(&ts->cur);
   free(ts->tabulist);
+#ifdef TSQUBO_SPARSE
   queue_free(&ts->d);
   queue_free(&ts->l);
   queue_free(&ts->ld);
+#endif
 }
 
 /**
@@ -371,8 +381,10 @@ void tsqubo_reset_solutions(struct tsqubo *ts) {
 void tsqubo_reset_tabu(struct tsqubo *ts) {
   memset(ts->tabulist, 0, ts->inst.n * sizeof(size_t));
   ts->iteration = 0;
+#ifdef TSQUBO_SPARSE
   ts->d.size = ts->l.size = ts->ld.size = 0;
   for (size_t i = 0; i < ts->inst.n; i++) queue_push(&ts->d, ts->cur.dx, compare_double, i);
+#endif
 }
 
 /**
@@ -390,6 +402,7 @@ void tsqubo_flip_current(struct tsqubo *ts, size_t i) {
     ts->cur.dx[j] =
         j == i ? -ts->cur.dx[j]
                : ts->cur.dx[j] - (1 - 2 * ts->cur.x[i]) * (1 - 2 * ts->cur.x[j]) * ts->inst.Q[k];
+#ifdef TSQUBO_SPARSE
     if (ts->cur.dx[j] < d) {
       if (queue_contains(&ts->d, j)) queue_decrease(&ts->d, ts->cur.dx, compare_double, ts->d.I[j]);
       if (queue_contains(&ts->ld, j))
@@ -400,6 +413,7 @@ void tsqubo_flip_current(struct tsqubo *ts, size_t i) {
       if (queue_contains(&ts->ld, j))
         queue_heapify(&ts->ld, ts->cur.dx, compare_double, ts->ld.I[j]);
     }
+#endif
   }
 }
 
@@ -410,11 +424,17 @@ void tsqubo_flip_current(struct tsqubo *ts, size_t i) {
  */
 void tsqubo_local_search(struct tsqubo *ts) {
   for (;;) {
+#ifdef TSQUBO_SPARSE
     size_t i = queue_top(&ts->d);
     if (ts->ld.size) {
       size_t j = queue_top(&ts->ld);
       if (ts->cur.dx[j] < ts->cur.dx[i]) i = j;
     }
+#else
+    size_t i = 0;
+    for (size_t j = 1; j < ts->inst.n; j++)
+      if (ts->cur.dx[j] < ts->cur.dx[i]) i = j;
+#endif
     if (ts->cur.dx[i] >= 0) break;
     tsqubo_flip_current(ts, i);
   }
@@ -424,17 +444,26 @@ void tsqubo_local_search(struct tsqubo *ts) {
  * Performs a TS iteration.
  *
  * @param ts an initialized TS structure.
- * @param K the tabu tenure to assign to flipped variables.
+ * @param ttc the tabu tenure to assign to flipped variables.
  * @return whether an improved solution was found or not.
  */
-int tsqubo_iterate(struct tsqubo *ts, size_t K) {
+bool tsqubo_iterate(struct tsqubo *ts, size_t ttc) {
+#ifdef TSQUBO_SPARSE
   size_t i = queue_top(&ts->d);
   if (ts->ld.size) {
     size_t j = queue_top(&ts->ld);
     if (ts->cur.fx + ts->cur.dx[j] < ts->inc.fx && ts->cur.dx[j] < ts->cur.dx[i]) i = j;
   }
+#else
+  size_t i = ts->inst.n;
+  for (size_t j = 0; j < ts->inst.n; j++) {
+    if (ts->iteration < ts->tabulist[j] && ts->cur.fx + ts->cur.dx[j] >= ts->inc.fx) continue;
+    if (i == ts->inst.n || ts->cur.dx[j] < ts->cur.dx[i]) i = j;
+  }
+#endif
   ++ts->iteration;
-  ts->tabulist[i] = ts->iteration + K;
+  ts->tabulist[i] = ts->iteration + ttc;
+#ifdef TSQUBO_SPARSE
   if (queue_contains(&ts->l, i)) {
     queue_heapify(&ts->l, ts->tabulist, compare_size, ts->l.I[i]);
   } else {
@@ -448,6 +477,7 @@ int tsqubo_iterate(struct tsqubo *ts, size_t K) {
     queue_remove(&ts->ld, ts->cur.dx, compare_double, ts->ld.I[j]);
     queue_push(&ts->d, ts->cur.dx, compare_double, j);
   }
+#endif
   tsqubo_flip_current(ts, i);
   return ts->cur.fx < ts->inc.fx;
 }
@@ -456,13 +486,13 @@ int tsqubo_iterate(struct tsqubo *ts, size_t K) {
  * Performs TS iterations until no improvements are possible for a number of iterations.
  *
  * @param ts an initialized TS structure.
- * @param K the tabu tenure to assign to flipped variables.
+ * @param ttc the tabu tenure to assign to flipped variables.
  * @param cutoff the improvement cutoff.
  */
-void tsqubo_iterate_cutoff(struct tsqubo *ts, size_t K, size_t cutoff) {
+void tsqubo_iterate_cutoff(struct tsqubo *ts, size_t ttc, size_t cutoff) {
 begin:
   for (size_t i = 0; i < cutoff; i++)
-    if (tsqubo_iterate(ts, K)) {
+    if (tsqubo_iterate(ts, ttc)) {
       tsqubo_local_search(ts);
       tsqubo_commit_incumbent(ts);
       goto begin;
