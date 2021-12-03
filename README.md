@@ -201,6 +201,9 @@ Parameters:
 ### `struct queue`
 An indexed priority queue structure. Enabled with the compile-time flag `TSQUBO_SPARSE`.
 
+Fields:
+* `size`: The current number of elements in the queue.
+
 ### `void queue_init(struct queue *q, size_t n)`
 Initializes an indexed priority queue data structure.
 
@@ -276,10 +279,10 @@ Parameters:
 * `k`: the position of the element to remove.
 
 ### `int compare_size(const struct tsqubo_queue *q, const void *v_, size_t a, size_t b)`
-Comparison function used in `queue_heapify` and `queue_decrease`, when the key values are of type `size_t`.
+Comparison function used in `queue_heapify` and `queue_decrease`, when the priority values are of type `size_t`.
 
 ### `int compare_double(const struct tsqubo_queue *q, const void *v_, size_t a, size_t b)`
-Comparison function used in `queue_heapify` and `queue_decrease`, when the key values are of type `double`.
+Comparison function used in `queue_heapify` and `queue_decrease`, when the priority values are of type `double`.
 
 ### `int compare_instance_components(const void *a_, const void *b_)`
 Comparison function used to sort the components in a QUBO problem instance before converting it to CSR format.
