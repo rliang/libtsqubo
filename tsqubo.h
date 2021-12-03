@@ -398,7 +398,9 @@ void tsqubo_flip_current(struct tsqubo *ts, size_t i) {
   ts->cur.x[i] = 1 - ts->cur.x[i];
   for (size_t k = ts->inst.R[i]; k < ts->inst.R[i + 1]; k++) {
     size_t j = ts->inst.C[k];
+#ifdef TSQUBO_SPARSE
     double d = ts->cur.dx[j];
+#endif
     ts->cur.dx[j] =
         j == i ? -ts->cur.dx[j]
                : ts->cur.dx[j] - (1 - 2 * ts->cur.x[i]) * (1 - 2 * ts->cur.x[j]) * ts->inst.Q[k];

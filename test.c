@@ -4,9 +4,8 @@
 #include "tsqubo.h"
 
 int main() {
-  FILE* file = fopen("G1", "r");
   size_t n, nonzeros;
-  assert(fscanf(file, "%zu%zu", &n, &nonzeros) == 2);
+  assert(scanf("%zu%zu", &n, &nonzeros) == 2);
   assert(n > 0);
   assert(nonzeros > 0);
   double* Q = calloc(n * n, sizeof(double));
@@ -16,7 +15,7 @@ int main() {
   for (size_t k = 0; k < nonzeros; k++) {
     size_t i, j;
     double q;
-    assert(fscanf(file, "%zu%zu%lf", &i, &j, &q) == 3);
+    assert(scanf("%zu%zu%lf", &i, &j, &q) == 3);
     i--;
     j--;
     Q[n * i + i] -= q;
@@ -27,7 +26,6 @@ int main() {
     diag[j] -= q;
     tsqubo_instance_add_component(&inst, i, j, q);
   }
-  fclose(file);
   for (size_t i = 0; i < n; i++) tsqubo_instance_add_component(&inst, i, i, diag[i]);
   free(diag);
   struct tsqubo* ts = tsqubo_new(&inst);
