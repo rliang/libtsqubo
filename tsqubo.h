@@ -15,9 +15,9 @@ struct tsqubo_solution {
 };
 
 /**
- * Initializes the TS structure.
+ * Initializes a solution structure.
  *
- * @param sol an uninitialized solution structure.
+ * @param sol pointer to an uninitialized solution structure.
  * @param n the number of variables.
  */
 void tsqubo_solution_init(struct tsqubo_solution *sol, size_t n) {
@@ -27,9 +27,9 @@ void tsqubo_solution_init(struct tsqubo_solution *sol, size_t n) {
 }
 
 /**
- * Frees the TS structure.
+ * Frees a solution structure.
  *
- * @param sol an initialized solution structure.
+ * @param sol pointer to an initialized solution structure.
  */
 void tsqubo_solution_free(struct tsqubo_solution *sol) {
   free(sol->x);
@@ -147,8 +147,8 @@ static int compare_instance_components(const void *a_, const void *b_) {
   return 0;
 }
 
-/** A QUBO problem instance structure, optimized for quick access. */
-struct tsqubo_compiled_instance {
+/** A QUBO problem instance structure in CSR format. */
+struct tsqubo_csr_instance {
   /** The number of variables, or rows in @ref Q. */
   size_t n;
   /** The coefficients of the matrix. */
@@ -159,8 +159,8 @@ struct tsqubo_compiled_instance {
   size_t *R;
 };
 
-static void tsqubo_compiled_instance_init(struct tsqubo_compiled_instance *cinst,
-                                          struct tsqubo_instance *inst) {
+static void tsqubo_csr_instance_init(struct tsqubo_csr_instance *cinst,
+                                     struct tsqubo_instance *inst) {
   qsort(inst->components, inst->ncomponents,
         sizeof(((struct tsqubo_instance *)NULL)->components[0]), compare_instance_components);
   cinst->n = inst->n;
@@ -176,7 +176,7 @@ static void tsqubo_compiled_instance_init(struct tsqubo_compiled_instance *cinst
   cinst->R[inst->n] = inst->ncomponents;
 }
 
-static void tsqubo_compiled_instance_free(struct tsqubo_compiled_instance *cinst) {
+static void tsqubo_csr_instance_free(struct tsqubo_csr_instance *cinst) {
   free(cinst->Q);
   free(cinst->C);
   free(cinst->R);
@@ -185,7 +185,7 @@ static void tsqubo_compiled_instance_free(struct tsqubo_compiled_instance *cinst
 #ifdef TSQUBO_SPARSE
 
 /** A QUBO tabu search indexed priority queue structure. */
-struct tsqubo_queue {
+struct queue {
   /** A permutation of `{1,2,...n}`. */
   size_t *N;
   /** An index vector that associates each `{1,2,...n}` to its position in @ref N. */
@@ -194,41 +194,41 @@ struct tsqubo_queue {
   size_t size;
 };
 
-static void queue_init(struct tsqubo_queue *q, size_t n) {
+static void queue_init(struct queue *q, size_t n) {
   q->N = (size_t *)calloc(n, sizeof(size_t));
   q->I = (size_t *)calloc(n, sizeof(size_t));
   for (size_t i = 0; i < n; i++) q->N[i] = q->I[i] = i;
   q->size = 0;
 }
 
-static void queue_free(struct tsqubo_queue *q) {
+static void queue_free(struct queue *q) {
   free(q->N);
   free(q->I);
 }
 
-static void queue_reorder(struct tsqubo_queue *q, size_t i, size_t k) {
+static void queue_reorder(struct queue *q, size_t i, size_t k) {
   q->I[q->N[k]] = q->I[i];
   q->N[q->I[i]] = q->N[k];
   q->I[i] = k;
   q->N[k] = i;
 }
 
-static int queue_contains(const struct tsqubo_queue *q, size_t i) { return q->I[i] < q->size; }
+static int queue_contains(const struct queue *q, size_t i) { return q->I[i] < q->size; }
 
-static size_t queue_top(const struct tsqubo_queue *q) { return q->N[0]; }
+static size_t queue_top(const struct queue *q) { return q->N[0]; }
 
-static int compare_size(const struct tsqubo_queue *q, const void *v_, size_t a, size_t b) {
+static int compare_size(const struct queue *q, const void *v_, size_t a, size_t b) {
   const size_t *v = (const size_t *)v_;
   return v[q->N[a]] < v[q->N[b]] || (v[q->N[a]] == v[q->N[b]] && q->N[a] < q->N[b]);
 }
 
-static int compare_double(const struct tsqubo_queue *q, const void *v_, size_t a, size_t b) {
+static int compare_double(const struct queue *q, const void *v_, size_t a, size_t b) {
   const double *v = (const double *)v_;
   return v[q->N[a]] < v[q->N[b]] || (v[q->N[a]] == v[q->N[b]] && q->N[a] < q->N[b]);
 }
 
-static void queue_heapify(struct tsqubo_queue *q, const void *dx,
-                          int (*compare)(const struct tsqubo_queue *, const void *, size_t, size_t),
+static void queue_heapify(struct queue *q, const void *dx,
+                          int (*compare)(const struct queue *, const void *, size_t, size_t),
                           size_t k) {
   for (;;) {
     size_t smallest = k, left = 2 * k + 1, right = 2 * k + 2;
@@ -240,9 +240,8 @@ static void queue_heapify(struct tsqubo_queue *q, const void *dx,
   }
 }
 
-static void queue_decrease(struct tsqubo_queue *q, const void *dx,
-                           int (*compare)(const struct tsqubo_queue *, const void *, size_t,
-                                          size_t),
+static void queue_decrease(struct queue *q, const void *dx,
+                           int (*compare)(const struct queue *, const void *, size_t, size_t),
                            size_t k) {
   for (size_t parent = (k - 1) / 2; k && compare(q, dx, k, parent); parent = (k - 1) / 2) {
     queue_reorder(q, q->N[k], parent);
@@ -250,22 +249,22 @@ static void queue_decrease(struct tsqubo_queue *q, const void *dx,
   }
 }
 
-static void queue_push(struct tsqubo_queue *q, const void *dx,
-                       int (*compare)(const struct tsqubo_queue *, const void *, size_t, size_t),
+static void queue_push(struct queue *q, const void *dx,
+                       int (*compare)(const struct queue *, const void *, size_t, size_t),
                        size_t i) {
   size_t k = q->size++;
   queue_reorder(q, i, k);
   queue_decrease(q, dx, compare, k);
 }
 
-static void queue_pop(struct tsqubo_queue *q, const void *dx,
-                      int (*compare)(const struct tsqubo_queue *, const void *, size_t, size_t)) {
+static void queue_pop(struct queue *q, const void *dx,
+                      int (*compare)(const struct queue *, const void *, size_t, size_t)) {
   queue_reorder(q, queue_top(q), --q->size);
   queue_heapify(q, dx, compare, 0);
 }
 
-static void queue_remove(struct tsqubo_queue *q, const void *dx,
-                         int (*compare)(const struct tsqubo_queue *, const void *, size_t, size_t),
+static void queue_remove(struct queue *q, const void *dx,
+                         int (*compare)(const struct queue *, const void *, size_t, size_t),
                          size_t k) {
   for (size_t parent = (k - 1) / 2; k; parent = (k - 1) / 2) {
     queue_reorder(q, q->N[k], parent);
@@ -279,7 +278,7 @@ static void queue_remove(struct tsqubo_queue *q, const void *dx,
 /** A QUBO tabu search structure. */
 struct tsqubo {
   /** The problem instance. */
-  struct tsqubo_compiled_instance inst;
+  struct tsqubo_csr_instance inst;
   /** The incumbent solution of the search. */
   struct tsqubo_solution inc;
   /** The current solution of the search. */
@@ -290,11 +289,11 @@ struct tsqubo {
   size_t iteration;
 #ifdef TSQUBO_SPARSE
   /** A priority queue of indices not in the tabu list, based on reevaluation vector values. */
-  struct tsqubo_queue d;
+  struct queue d;
   /** A priority queue of indices in the tabu list, based on the values in the tabu list. */
-  struct tsqubo_queue l;
+  struct queue l;
   /** A priority queue of indices in the tabu list, based on reevaluation vector values. */
-  struct tsqubo_queue ld;
+  struct queue ld;
 #endif
 };
 
@@ -304,7 +303,7 @@ struct tsqubo {
  * @param ts an uninitialized TS structure.
  */
 void tsqubo_init(struct tsqubo *ts, struct tsqubo_instance *inst) {
-  tsqubo_compiled_instance_init(&ts->inst, inst);
+  tsqubo_csr_instance_init(&ts->inst, inst);
   tsqubo_solution_init(&ts->inc, inst->n);
   tsqubo_solution_init(&ts->cur, inst->n);
   ts->tabulist = (size_t *)calloc(inst->n, sizeof(size_t));
@@ -318,7 +317,8 @@ void tsqubo_init(struct tsqubo *ts, struct tsqubo_instance *inst) {
 /**
  * Allocates and initializes the TS structure.
  *
- * @return a newly-allocated QUBO problem instance structure.
+ * @param inst the problem instance to solve.
+ * @return a newly-allocated TS structure.
  */
 struct tsqubo *tsqubo_new(struct tsqubo_instance *inst) {
   struct tsqubo *ts = (struct tsqubo *)calloc(1, sizeof(struct tsqubo));
@@ -332,7 +332,7 @@ struct tsqubo *tsqubo_new(struct tsqubo_instance *inst) {
  * @param ts an initialized TS structure.
  */
 void tsqubo_free(struct tsqubo *ts) {
-  tsqubo_compiled_instance_free(&ts->inst);
+  tsqubo_csr_instance_free(&ts->inst);
   tsqubo_solution_free(&ts->inc);
   tsqubo_solution_free(&ts->cur);
   free(ts->tabulist);
@@ -388,7 +388,7 @@ void tsqubo_reset_tabu(struct tsqubo *ts) {
 }
 
 /**
- * Flips a variable of the current solution.
+ * Flips a variable of the current solution to its complementary value.
  *
  * @param ts an initialized TS structure.
  * @param i the index of the variable to flip.
