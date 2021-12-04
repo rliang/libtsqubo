@@ -198,26 +198,26 @@ Frees the memory associated with a QUBO problem instance in CSR format.
 Parameters:
 * `cinst` pointer to an initialized QUBO problem instance in CSR format.
 
-### `struct queue`
+### `struct ipq`
 An indexed priority queue structure. Enabled with the compile-time flag `TSQUBO_SPARSE`.
 
 Fields:
 * `size`: The current number of elements in the queue.
 
-### `void queue_init(struct queue *q, size_t n)`
+### `void ipq_init(struct ipq *q, size_t n)`
 Initializes an indexed priority queue data structure.
 
 Parameters:
 * `q`: an uninitialized indexed priority queue data structure.
 * `n`: states that the structure may store values from the set `{1,2,...n}`.
 
-### `void queue_free(struct queue *q)`
+### `void ipq_free(struct ipq *q)`
 Frees the memory associated with an indexed priority queue structure.
 
 Parameters:
 * `q`: an initialized indexed priority queue data structure.
 
-### `void queue_reorder(struct queue *q, size_t i, size_t k)`
+### `void ipq_reorder(struct ipq *q, size_t i, size_t k)`
 Changes the position of an element within the queue.
 
 Parameters:
@@ -225,7 +225,7 @@ Parameters:
 * `i`: The element from `{1,2,...n}` which to change the position of.
 * `k`: The new position of `i` in the queue.
 
-### `size_t queue_top(const struct queue *q)`
+### `size_t ipq_top(const struct ipq *q)`
 Obtains the element from `{1,2,...,n}` with the minimum priority in the queue.
 
 Parameters:
@@ -234,7 +234,7 @@ Parameters:
 Returns:
 An element from `{1,2,...,n}`.
 
-### `void queue_heapify(struct queue *q, const void *dx, int (*compare)(const struct queue *, const void *, size_t, size_t), size_t k)`
+### `void ipq_heapify(struct ipq *q, const void *dx, int (*compare)(const struct ipq *, const void *, size_t, size_t), size_t k)`
 Corrects the minimum-heap property starting at a given position up to the end of the queue.
 
 Parameters:
@@ -243,7 +243,7 @@ Parameters:
 * `compare`: an appropriate comparison function according to the type of `dx`.
 * `k`: The starting index from which to correct the minimum-heap property.
 
-### `void queue_decrease(struct queue *q, const void *dx, int (*compare)(const struct queue *, const void *, size_t, size_t), size_t k)`
+### `void ipq_decrease(struct ipq *q, const void *dx, int (*compare)(const struct ipq *, const void *, size_t, size_t), size_t k)`
 Corrects the minimum-heap property starting at a given position down to the beginning of the queue.
 
 Parameters:
@@ -252,7 +252,7 @@ Parameters:
 * `compare`: an appropriate comparison function according to the type of `dx`.
 * `k`: The end index up to which to correct the minimum-heap property.
 
-### `void queue_push(struct queue *q, const void *dx, int (*compare)(const struct queue *, const void *, size_t, size_t), size_t i)`
+### `void ipq_push(struct ipq *q, const void *dx, int (*compare)(const struct ipq *, const void *, size_t, size_t), size_t i)`
 Inserts an element from `{1,2,...n}` into the queue.
 
 Parameters:
@@ -261,7 +261,7 @@ Parameters:
 * `compare`: an appropriate comparison function according to the type of `dx`.
 * `i`: the element to insert into the queue.
 
-### `void queue_pop(struct queue *q, const void *dx, int (*compare)(const struct queue *, const void *, size_t, size_t))`
+### `void ipq_pop(struct ipq *q, const void *dx, int (*compare)(const struct ipq *, const void *, size_t, size_t))`
 Removes the top element of the queue.
 
 Parameters:
@@ -269,7 +269,7 @@ Parameters:
 * `dx`: an array where each `i`th element is the priority of the element `i`.
 * `compare`: an appropriate comparison function according to the type of `dx`.
 
-### `void queue_remove(struct queue *q, const void *dx, int (*compare)(const struct queue *, const void *, size_t, size_t), size_t k)`
+### `void ipq_remove(struct ipq *q, const void *dx, int (*compare)(const struct ipq *, const void *, size_t, size_t), size_t k)`
 Removes an element at an arbitrary position in the queue.
 
 Parameters:
@@ -279,10 +279,10 @@ Parameters:
 * `k`: the position of the element to remove.
 
 ### `int compare_size(const struct tsqubo_queue *q, const void *v_, size_t a, size_t b)`
-Comparison function used in `queue_heapify` and `queue_decrease`, when the priority values are of type `size_t`.
+Comparison function used in `ipq_heapify` and `ipq_decrease`, when the priority values are of type `size_t`.
 
 ### `int compare_double(const struct tsqubo_queue *q, const void *v_, size_t a, size_t b)`
-Comparison function used in `queue_heapify` and `queue_decrease`, when the priority values are of type `double`.
+Comparison function used in `ipq_heapify` and `ipq_decrease`, when the priority values are of type `double`.
 
 ### `int compare_instance_components(const void *a_, const void *b_)`
 Comparison function used to sort the components in a QUBO problem instance before converting it to CSR format.

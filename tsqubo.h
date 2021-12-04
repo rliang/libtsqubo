@@ -1,5 +1,6 @@
 #pragma once
 
+#define TSQUBO_SPARSE
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -184,8 +185,8 @@ static void tsqubo_csr_instance_free(struct tsqubo_csr_instance *cinst) {
 
 #ifdef TSQUBO_SPARSE
 
-/** A QUBO tabu search indexed priority queue structure. */
-struct queue {
+/** An indexed priority queue structure. */
+struct ipq {
   /** A permutation of `{1,2,...n}`. */
   size_t *N;
   /** An index vector that associates each `{1,2,...n}` to its position in @ref N. */
@@ -194,83 +195,81 @@ struct queue {
   size_t size;
 };
 
-static void queue_init(struct queue *q, size_t n) {
+static void ipq_init(struct ipq *q, size_t n) {
   q->N = (size_t *)calloc(n, sizeof(size_t));
   q->I = (size_t *)calloc(n, sizeof(size_t));
   for (size_t i = 0; i < n; i++) q->N[i] = q->I[i] = i;
   q->size = 0;
 }
 
-static void queue_free(struct queue *q) {
+static void ipq_free(struct ipq *q) {
   free(q->N);
   free(q->I);
 }
 
-static void queue_reorder(struct queue *q, size_t i, size_t k) {
+static void ipq_reorder(struct ipq *q, size_t i, size_t k) {
   q->I[q->N[k]] = q->I[i];
   q->N[q->I[i]] = q->N[k];
   q->I[i] = k;
   q->N[k] = i;
 }
 
-static int queue_contains(const struct queue *q, size_t i) { return q->I[i] < q->size; }
+static int ipq_contains(const struct ipq *q, size_t i) { return q->I[i] < q->size; }
 
-static size_t queue_top(const struct queue *q) { return q->N[0]; }
+static size_t ipq_top(const struct ipq *q) { return q->N[0]; }
 
-static int compare_size(const struct queue *q, const void *v_, size_t a, size_t b) {
+static int compare_size(const struct ipq *q, const void *v_, size_t a, size_t b) {
   const size_t *v = (const size_t *)v_;
   return v[q->N[a]] < v[q->N[b]] || (v[q->N[a]] == v[q->N[b]] && q->N[a] < q->N[b]);
 }
 
-static int compare_double(const struct queue *q, const void *v_, size_t a, size_t b) {
+static int compare_double(const struct ipq *q, const void *v_, size_t a, size_t b) {
   const double *v = (const double *)v_;
   return v[q->N[a]] < v[q->N[b]] || (v[q->N[a]] == v[q->N[b]] && q->N[a] < q->N[b]);
 }
 
-static void queue_heapify(struct queue *q, const void *dx,
-                          int (*compare)(const struct queue *, const void *, size_t, size_t),
-                          size_t k) {
+static void ipq_sift_up(struct ipq *q, const void *dx,
+                        int (*compare)(const struct ipq *, const void *, size_t, size_t),
+                        size_t k) {
   for (;;) {
     size_t smallest = k, left = 2 * k + 1, right = 2 * k + 2;
     if (left < q->size && compare(q, dx, left, k)) smallest = left;
     if (right < q->size && compare(q, dx, right, smallest)) smallest = right;
     if (smallest == k) break;
-    queue_reorder(q, q->N[k], smallest);
+    ipq_reorder(q, q->N[k], smallest);
     k = smallest;
   }
 }
 
-static void queue_decrease(struct queue *q, const void *dx,
-                           int (*compare)(const struct queue *, const void *, size_t, size_t),
-                           size_t k) {
+static void ipq_sift_down(struct ipq *q, const void *dx,
+                          int (*compare)(const struct ipq *, const void *, size_t, size_t),
+                          size_t k) {
   for (size_t parent = (k - 1) / 2; k && compare(q, dx, k, parent); parent = (k - 1) / 2) {
-    queue_reorder(q, q->N[k], parent);
+    ipq_reorder(q, q->N[k], parent);
     k = parent;
   }
 }
 
-static void queue_push(struct queue *q, const void *dx,
-                       int (*compare)(const struct queue *, const void *, size_t, size_t),
-                       size_t i) {
+static void ipq_push(struct ipq *q, const void *dx,
+                     int (*compare)(const struct ipq *, const void *, size_t, size_t), size_t i) {
   size_t k = q->size++;
-  queue_reorder(q, i, k);
-  queue_decrease(q, dx, compare, k);
+  ipq_reorder(q, i, k);
+  ipq_sift_down(q, dx, compare, k);
 }
 
-static void queue_pop(struct queue *q, const void *dx,
-                      int (*compare)(const struct queue *, const void *, size_t, size_t)) {
-  queue_reorder(q, queue_top(q), --q->size);
-  queue_heapify(q, dx, compare, 0);
+static void ipq_pop(struct ipq *q, const void *dx,
+                    int (*compare)(const struct ipq *, const void *, size_t, size_t)) {
+  ipq_reorder(q, ipq_top(q), --q->size);
+  ipq_sift_up(q, dx, compare, 0);
 }
 
-static void queue_remove(struct queue *q, const void *dx,
-                         int (*compare)(const struct queue *, const void *, size_t, size_t),
-                         size_t k) {
+static void ipq_remove(struct ipq *q, const void *dx,
+                       int (*compare)(const struct ipq *, const void *, size_t, size_t), size_t k) {
   for (size_t parent = (k - 1) / 2; k; parent = (k - 1) / 2) {
-    queue_reorder(q, q->N[k], parent);
+    ipq_reorder(q, q->N[k], parent);
     k = parent;
   }
-  queue_pop(q, dx, compare);
+  ipq_pop(q, dx, compare);
 }
 
 #endif
@@ -289,11 +288,11 @@ struct tsqubo {
   size_t iteration;
 #ifdef TSQUBO_SPARSE
   /** A priority queue of indices not in the tabu list, based on reevaluation vector values. */
-  struct queue d;
+  struct ipq d;
   /** A priority queue of indices in the tabu list, based on the values in the tabu list. */
-  struct queue l;
+  struct ipq l;
   /** A priority queue of indices in the tabu list, based on reevaluation vector values. */
-  struct queue ld;
+  struct ipq ld;
 #endif
 };
 
@@ -308,9 +307,9 @@ void tsqubo_init(struct tsqubo *ts, struct tsqubo_instance *inst) {
   tsqubo_solution_init(&ts->cur, inst->n);
   ts->tabulist = (size_t *)calloc(inst->n, sizeof(size_t));
 #ifdef TSQUBO_SPARSE
-  queue_init(&ts->d, inst->n);
-  queue_init(&ts->l, inst->n);
-  queue_init(&ts->ld, inst->n);
+  ipq_init(&ts->d, inst->n);
+  ipq_init(&ts->l, inst->n);
+  ipq_init(&ts->ld, inst->n);
 #endif
 }
 
@@ -337,9 +336,9 @@ void tsqubo_free(struct tsqubo *ts) {
   tsqubo_solution_free(&ts->cur);
   free(ts->tabulist);
 #ifdef TSQUBO_SPARSE
-  queue_free(&ts->d);
-  queue_free(&ts->l);
-  queue_free(&ts->ld);
+  ipq_free(&ts->d);
+  ipq_free(&ts->l);
+  ipq_free(&ts->ld);
 #endif
 }
 
@@ -383,7 +382,7 @@ void tsqubo_reset_tabu(struct tsqubo *ts) {
   ts->iteration = 0;
 #ifdef TSQUBO_SPARSE
   ts->d.size = ts->l.size = ts->ld.size = 0;
-  for (size_t i = 0; i < ts->inst.n; i++) queue_push(&ts->d, ts->cur.dx, compare_double, i);
+  for (size_t i = 0; i < ts->inst.n; i++) ipq_push(&ts->d, ts->cur.dx, compare_double, i);
 #endif
 }
 
@@ -406,14 +405,12 @@ void tsqubo_flip_current(struct tsqubo *ts, size_t i) {
                : ts->cur.dx[j] - (1 - 2 * ts->cur.x[i]) * (1 - 2 * ts->cur.x[j]) * ts->inst.Q[k];
 #ifdef TSQUBO_SPARSE
     if (ts->cur.dx[j] < d) {
-      if (queue_contains(&ts->d, j)) queue_decrease(&ts->d, ts->cur.dx, compare_double, ts->d.I[j]);
-      if (queue_contains(&ts->ld, j))
-        queue_decrease(&ts->ld, ts->cur.dx, compare_double, ts->ld.I[j]);
+      if (ipq_contains(&ts->d, j)) ipq_sift_down(&ts->d, ts->cur.dx, compare_double, ts->d.I[j]);
+      if (ipq_contains(&ts->ld, j)) ipq_sift_down(&ts->ld, ts->cur.dx, compare_double, ts->ld.I[j]);
     }
     if (ts->cur.dx[j] > d) {
-      if (queue_contains(&ts->d, j)) queue_heapify(&ts->d, ts->cur.dx, compare_double, ts->d.I[j]);
-      if (queue_contains(&ts->ld, j))
-        queue_heapify(&ts->ld, ts->cur.dx, compare_double, ts->ld.I[j]);
+      if (ipq_contains(&ts->d, j)) ipq_sift_up(&ts->d, ts->cur.dx, compare_double, ts->d.I[j]);
+      if (ipq_contains(&ts->ld, j)) ipq_sift_up(&ts->ld, ts->cur.dx, compare_double, ts->ld.I[j]);
     }
 #endif
   }
@@ -427,9 +424,9 @@ void tsqubo_flip_current(struct tsqubo *ts, size_t i) {
 void tsqubo_local_search(struct tsqubo *ts) {
   for (;;) {
 #ifdef TSQUBO_SPARSE
-    size_t i = queue_top(&ts->d);
+    size_t i = ipq_top(&ts->d);
     if (ts->ld.size) {
-      size_t j = queue_top(&ts->ld);
+      size_t j = ipq_top(&ts->ld);
       if (ts->cur.dx[j] < ts->cur.dx[i]) i = j;
     }
 #else
@@ -451,9 +448,9 @@ void tsqubo_local_search(struct tsqubo *ts) {
  */
 bool tsqubo_iterate(struct tsqubo *ts, size_t ttc) {
 #ifdef TSQUBO_SPARSE
-  size_t i = queue_top(&ts->d);
+  size_t i = ipq_top(&ts->d);
   if (ts->ld.size) {
-    size_t j = queue_top(&ts->ld);
+    size_t j = ipq_top(&ts->ld);
     if (ts->cur.fx + ts->cur.dx[j] < ts->inc.fx && ts->cur.dx[j] < ts->cur.dx[i]) i = j;
   }
 #else
@@ -466,18 +463,18 @@ bool tsqubo_iterate(struct tsqubo *ts, size_t ttc) {
   ++ts->iteration;
   ts->tabulist[i] = ts->iteration + ttc;
 #ifdef TSQUBO_SPARSE
-  if (queue_contains(&ts->l, i)) {
-    queue_heapify(&ts->l, ts->tabulist, compare_size, ts->l.I[i]);
+  if (ipq_contains(&ts->l, i)) {
+    ipq_sift_up(&ts->l, ts->tabulist, compare_size, ts->l.I[i]);
   } else {
-    queue_pop(&ts->d, ts->cur.dx, compare_double);
-    queue_push(&ts->l, ts->tabulist, compare_size, i);
-    queue_push(&ts->ld, ts->cur.dx, compare_double, i);
+    ipq_pop(&ts->d, ts->cur.dx, compare_double);
+    ipq_push(&ts->l, ts->tabulist, compare_size, i);
+    ipq_push(&ts->ld, ts->cur.dx, compare_double, i);
   }
-  while (ts->l.size && ts->iteration >= ts->tabulist[queue_top(&ts->l)]) {
-    size_t j = queue_top(&ts->l);
-    queue_pop(&ts->l, ts->tabulist, compare_size);
-    queue_remove(&ts->ld, ts->cur.dx, compare_double, ts->ld.I[j]);
-    queue_push(&ts->d, ts->cur.dx, compare_double, j);
+  while (ts->l.size && ts->iteration >= ts->tabulist[ipq_top(&ts->l)]) {
+    size_t j = ipq_top(&ts->l);
+    ipq_pop(&ts->l, ts->tabulist, compare_size);
+    ipq_remove(&ts->ld, ts->cur.dx, compare_double, ts->ld.I[j]);
+    ipq_push(&ts->d, ts->cur.dx, compare_double, j);
   }
 #endif
   tsqubo_flip_current(ts, i);
