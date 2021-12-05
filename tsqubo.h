@@ -1,6 +1,5 @@
 #pragma once
 
-#define TSQUBO_SPARSE
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
