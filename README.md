@@ -234,7 +234,7 @@ Parameters:
 Returns:
 An element from `{1,2,...,n}`.
 
-### `void ipq_heapify(struct ipq *q, const void *dx, int (*compare)(const struct ipq *, const void *, size_t, size_t), size_t k)`
+### `void ipq_sift_up(struct ipq *q, const void *dx, int (*compare)(const struct ipq *, const void *, size_t, size_t), size_t k)`
 Corrects the minimum-heap property starting at a given position up to the end of the queue.
 
 Parameters:
@@ -243,7 +243,7 @@ Parameters:
 * `compare`: an appropriate comparison function according to the type of `dx`.
 * `k`: The starting index from which to correct the minimum-heap property.
 
-### `void ipq_decrease(struct ipq *q, const void *dx, int (*compare)(const struct ipq *, const void *, size_t, size_t), size_t k)`
+### `void ipq_sift_down(struct ipq *q, const void *dx, int (*compare)(const struct ipq *, const void *, size_t, size_t), size_t k)`
 Corrects the minimum-heap property starting at a given position down to the beginning of the queue.
 
 Parameters:
@@ -279,10 +279,10 @@ Parameters:
 * `k`: the position of the element to remove.
 
 ### `int compare_size(const struct tsqubo_queue *q, const void *v_, size_t a, size_t b)`
-Comparison function used in `ipq_heapify` and `ipq_decrease`, when the priority values are of type `size_t`.
+Comparison function used in `ipq_sift_up` and `ipq_sift_down`, when the priority values are of type `size_t`.
 
 ### `int compare_double(const struct tsqubo_queue *q, const void *v_, size_t a, size_t b)`
-Comparison function used in `ipq_heapify` and `ipq_decrease`, when the priority values are of type `double`.
+Comparison function used in `ipq_sift_up` and `ipq_sift_down`, when the priority values are of type `double`.
 
 ### `int compare_instance_components(const void *a_, const void *b_)`
 Comparison function used to sort the components in a QUBO problem instance before converting it to CSR format.
