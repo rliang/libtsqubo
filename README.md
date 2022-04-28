@@ -46,6 +46,23 @@ int main() {
 }
 ```
 
+# Citing
+
+If you use this library in your research,
+please reference it using the following citation:
+```bib
+@Article{Liang2022,
+  author={Liang, Ricardo N. and Anacleto, Eduardo A. J. and Meneses, Cl{\'a}udio N.},
+  title={Data structures for speeding up Tabu Search when solving sparse quadratic unconstrained binary optimization problems},
+  journal={Journal of Heuristics},
+  year={2022},
+  month={Apr},
+  day={27},
+  issn={1572-9397},
+  doi={10.1007/s10732-022-09498-0},
+}
+```
+
 # API
 
 Here we describe the structures and functions that users may use to solve QUBO problem instances by Tabu Search.
