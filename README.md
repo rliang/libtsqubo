@@ -22,7 +22,7 @@ To run the sanity tests, clone the repository and run the command `make`.
 
 int main() {
   // create a QUBO instance and add some components to the matrix
-  struct tsqubo_instance *instance = tsqubo_instance_new();
+  struct tsqubo_instance *instance = tsqubo_instance_new(/* initial capacity for components */ 4);
   tsqubo_instance_add_component(instance, 0, 0, 2);
   tsqubo_instance_add_component(instance, 1, 1, -3);
   tsqubo_instance_add_component(instance, 2, 2, 5);
