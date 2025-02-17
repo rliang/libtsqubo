@@ -394,14 +394,14 @@ void tsqubo_reset_tabu(struct tsqubo *ts) {
 void tsqubo_flip_current(struct tsqubo *ts, size_t i) {
   ts->cur.fx += ts->cur.dx[i];
   ts->cur.x[i] = 1 - ts->cur.x[i];
+  ts->cur.dx[i] *= -1;
   for (size_t k = ts->inst.R[i]; k < ts->inst.R[i + 1]; k++) {
     size_t j = ts->inst.C[k];
 #ifdef TSQUBO_SPARSE
     double d = ts->cur.dx[j];
 #endif
-    ts->cur.dx[j] =
-        j == i ? -ts->cur.dx[j]
-               : ts->cur.dx[j] - (1 - 2 * ts->cur.x[i]) * (1 - 2 * ts->cur.x[j]) * ts->inst.Q[k];
+    if (i != j)
+    ts->cur.dx[j] -= (1 - 2 * ts->cur.x[i]) * (1 - 2 * ts->cur.x[j]) * ts->inst.Q[k];
 #ifdef TSQUBO_SPARSE
     if (ts->cur.dx[j] < d) {
       if (ipq_contains(&ts->d, j)) ipq_sift_down(&ts->d, ts->cur.dx, compare_double, ts->d.I[j]);
