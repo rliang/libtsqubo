@@ -18,6 +18,7 @@ To run the sanity tests, clone the repository and run the command `make`.
 
 ```c
 #define TSQUBO_SPARSE
+#include <stdio.h>
 #include "tsqubo.h"
 
 int main() {
@@ -32,6 +33,9 @@ int main() {
   struct tsqubo *ts = tsqubo_new(instance);
   tsqubo_instance_free(instance);
   free(instance);
+
+  // initialise solution vectors and queues
+  tsqubo_reset_tabu(ts);
 
   // run TS until no improved solutions are found for 5 consecutive iterations
   size_t tabu_tenure_constant = 10, improvement_cutoff = 5;
