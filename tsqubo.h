@@ -446,20 +446,26 @@ void tsqubo_local_search(struct tsqubo *ts) {
  * @return whether an improved solution was found or not.
  */
 bool tsqubo_iterate(struct tsqubo *ts, size_t ttc) {
+  size_t i = ts->inst.n;
 #ifdef TSQUBO_SPARSE
-  size_t i = ipq_top(&ts->d);
+  if (ts->d.size > 0) {
+    i = ipq_top(&ts->d);
+  }
   if (ts->ld.size) {
     size_t j = ipq_top(&ts->ld);
     if (ts->cur.fx + ts->cur.dx[j] < ts->inc.fx && ts->cur.dx[j] < ts->cur.dx[i]) i = j;
   }
 #else
-  size_t i = ts->inst.n;
   for (size_t j = 0; j < ts->inst.n; j++) {
     if (ts->iteration < ts->tabulist[j] && ts->cur.fx + ts->cur.dx[j] >= ts->inc.fx) continue;
     if (i == ts->inst.n || ts->cur.dx[j] < ts->cur.dx[i]) i = j;
   }
 #endif
   ++ts->iteration;
+  if (i == ts->inst.n) 
+  // If all flips are tabu and none improve the incumbent, don't flip.
+  return 0;
+
   ts->tabulist[i] = ts->iteration + ttc;
 #ifdef TSQUBO_SPARSE
   if (ipq_contains(&ts->l, i)) {
