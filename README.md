@@ -35,6 +35,7 @@ int main() {
   free(instance);
 
   // initialise solution vectors and queues
+  tsqubo_reset_solutions(ts);
   tsqubo_reset_tabu(ts);
 
   // run TS until no improved solutions are found for 5 consecutive iterations
